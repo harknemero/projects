@@ -38,6 +38,8 @@ namespace TriangleCalculator
             label4.Text = controller.getDescription();
         }
 
+        // Takes a string and a warning label. Sets warning label if text is non-numeric.
+        // Returns 0 if string is empty or non-numeric. Otherwise, returns numeric value of string.
         private double textHandler(Label warning, string text)
         {
             double result = 0;
