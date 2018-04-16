@@ -1,0 +1,118 @@
+﻿
+
+
+
+
+
+Features:
+	Creates a separate thread on open. 
+	New thread polls battery management module every 30 seconds. (During development this is set to 3 seconds)
+
+
+
+I2C Protocol
+	Addressing a different register requires a write.
+	Read multiple registers in a single read.
+	Write command of any length.
+
+	Authentication Key - 0x0123456789ABCDEFFEDCBA987654321
+
+	Dataflash Memory
+	Unsealed Access Key - Subclass ID: 112, Offset: 20
+	Number of Series Cells - Subclass ID: 64, Offset: 7
+
+	Steps for altering data in data-flash
+		Unseal the data-flash.
+			Each transition requires that a unique set of two keys be sent to the bq34z100 via the Control() command.
+			The keys must be sent consecutively, with no other data being written to the Control() register in between.
+			Unseal keys are 2 bytes each in length and are stored in data flash at Unseal Key 0 and Unseal Key 1.
+				If the 1st and 2nd word of the UnSeal Key 0 returns 0x1234 and 0x5678, then Control() should supply 0x3412 and 0x7856 to unseal the part.
+		Transfer the desired DataBlock to the command register locations.
+			Send the set-up command by writing 0x00 to BlockDataControl() (code 0x61).
+			Send class ID to DataFlashClass() (code 0x3E).
+			Enable general purpose block by writing 0x00 to DataFlashBlock() (code 0x3F).
+			Now 32 bytes can be read from and written to the DataBlock from command register locations 0x40-0x5f.
+		Write the correct checksum for the whole block to BlockDataChecksum() (command number 0x60).
+
+	Example 1:
+		Find the SubClass and Offset for the data that you want to read. We will use Serial Number for this example. SubClass 48, Offset 04 and it occupies 2 bytes.
+		Convert the SubClass HEX. 48 = 30H Use the I2C Master Control Panel section to read the flash.
+		Start Register 61, Bytes to Write 00 (Enable Flash x’fer command)
+		Start Register 3E, Bytes to Write 30 (SubClass address)
+		Start Register 3F, Bytes to Write 00 (Enable General Purpose Block)
+		Start Register 40, Number of Bytes to Read 20
+		The Serial number starts in the 5th byte. (0 is the first byte) The Serial Number is 0001 in this example.
+
+
+7.3.3.1 Accessing Data Flash
+The bq34z100-G1 data flash is a non-volatile memory that contains bq34z100-G1 initialization, default, cell status, calibration, configuration, and user information. 
+The data flash can be accessed in several different ways, depending on in what mode the bq34z100-G1 is operating and what data is being accessed.
+Commonly accessed data flash memory locations, frequently read by a host, are conveniently accessed through specific instructions described in Data Commands. 
+These commands are available when the bq34z100-G1 is either in UNSEALED or SEALED modes.
+
+Most data flash locations, however, can only be accessible in UNSEALED mode by use of the bq34z100-G1 evaluation software or by data flash block transfers. 
+These locations should be optimized and/or fixed during the development and manufacture processes. 
+They become part of a Golden Image File and can then be written to multiple battery packs. 
+Once established, the values generally remain unchanged during end-equipment operation.
+To access data flash locations individually, the block containing the desired data flash location(s) must be transferred to the command register locations where 
+they can be read to the host or changed directly. This is accomplished by sending the set-up command BlockDataControl() (code 0x61) with data 0x00. 
+Up to 32 bytes of data can be read directly from the BlockData() command locations 0x40…0x5F, externally altered, then re-written to the BlockData() command space. 
+Alternatively, specific locations can be read, altered, and re-written if their corresponding offsets are used to index into the BlockData() command space. 
+Finally, the data residing in the command space is transferred to data flash, once the correct checksum for the whole block is 
+written to BlockDataChecksum() (command number 0x60).
+
+Occasionally, a data flash class will be larger than the 32-byte block size. 
+In this case, the DataFlashBlock() command is used to designate which 32-byte block in which the desired locations reside. 
+The correct command address is then given by 0x40 + offset modulo 32. For example, to access Terminate Voltage in the Gas Gauging class, 
+DataFlashClass() is issued 80 (0x50) to set the class. Because the offset is 48, it must reside in the second 32-byte block. Hence, DataFlashBlock() is 
+issued 0x01 to set the block offset, and the offset used to index into the BlockData() memory area is 0x40 + 48 modulo 32 = 0x40 + 16 = 0x40 + 0x10 = 0x50; 
+for example, to modify [VOLTSEL] in Pack Configuration from 0 to 1 to enable the external voltage measurement option.
+
+NOTE The subclass ID and Offset values are in decimal format in the documentation and in bqSTUDIO. 
+The example below shows these values converted to hexadecimal. For example, the Pack Configuration subclass is d64 = 0x40.
+	1. Unseal the device using the Control() (0x00/0x01) command if the device is sealed. 
+		(a) Write the first 2 bytes of the UNSEAL key using the Control(0x0414) command. (wr 0x00 0x14 0x04) 
+		(b) Write the second 2 bytes of the UNSEAL key using the Control(0x3672) command. (wr 0x00 0x72 0x36) 
+	2. Write 0x00 using BlockDataControl() command (0x61) to enable block data flash control. (wr 0x61 0x00) 
+	3. Write 0x40 (Pack Configuration Subclass) using the DataFlashClass() command (0x3E) to access the Registers subclass. (wr 0x3E 0x40)
+	4. Write the block offset location using DataFlashBlock() command (0x3F). To access data located at offset 0 to 31, use offset = 0x00. 
+		To access data located at offset 32 to 63, use offset = 0x01, and so on, as necessary.
+		For example, Pack Configuration (offset = 0) is in the first block so use (wr 0x3F 0x00). 
+	5. To read the data of a specific offset, use address 0x40 + mod(offset, 32). 
+		For example, Pack Configuration (offset = 0) is located at 0x40 and 0x41; however, [VOLTSEL] is in the MSB so only 0x40 needs to be read. 
+		Read 1 byte starting at the 0x40 address. (rd 0x40 old_Pack_Configuration_MSB)
+		In this example, assume [VOLTSEL] = 0 (default). 
+	6. To read the 1-byte checksum, use the BlockDataChecksum() command (0x60). (rd 0x60 OLD_checksum) 
+	7. In this example, set [VOLTSEL] by setting Bit 3 of old_Pack_Configuration_MSB to create new_Pack_Configuration_MSB. 
+	8. The new value for new_Pack_Configuration_MSB can be written by writing to the specific offset location.
+		For example, to write 1-byte new_Pack_Configuration_MSB to Pack Configuration (offset=0) located at 0x40, use command (wr 0x4B new_Pack_Configuration_MSB). 
+	9. The data is actually transferred to the data flash when the correct checksum for the whole block (0x40 to 0x5F) is written to BlockDataChecksum() (0x60). (wr 0x60 NEW_checksum)
+		The checksum is (255-x) where x is the 8-bit summation of the BlockData() (0x40 to 0x5F) on a byte-by-byte basis.
+		A quick way to calculate the new checksum is to make use of the old checksum: 
+			(a) temp = mod (255 – OLD_checksum – old_Pack_Configuration_MSB), 256) 
+			(b) NEW_checksum = 255 – mod (temp + new_Pack_Configuration_MSB, 256) 
+	10. Reset the gauge to ensure the new data flash parameter goes into effect by using Control(0x0041). (wr 0x00 0x41 0x00)
+		If previously sealed, the gauge will automatically become sealed again after RESET. 
+	11. If not previously sealed, then seal the gauge by using Control(0x0020). (wr 0x00 0x20 0x00)
+		Reading and writing subclass data are block operations 32 bytes in length. 
+		Data can be written in shorter block sizes, however. Blocks can be shorter than 32 bytes in length. 
+		Writing these blocks back to data flash will not overwrite data that extend beyond the actual block length.
+	NOTE: None of the data written to memory is bounded by the bq34z100-G1: The values are not rejected by the gas gauge. 
+		Writing an incorrect value may result in hardware failure due to firmware program interpretation of the invalid data. 
+		The data written is persistent, so a power-on reset resolves the fault.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
